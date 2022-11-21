@@ -109,6 +109,8 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// </summary>
         public SwizzleComponent SwizzleA { get; }
 
+        public int RemovedLevels { get; }
+
         /// <summary>
         /// Constructs the texture information structure.
         /// </summary>
@@ -132,45 +134,62 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="swizzleB">Swizzle for the blue color channel</param>
         /// <param name="swizzleA">Swizzle for the alpha color channel</param>
         public TextureInfo(
-            ulong            gpuAddress,
-            int              width,
-            int              height,
-            int              depthOrLayers,
-            int              levels,
-            int              samplesInX,
-            int              samplesInY,
-            int              stride,
-            bool             isLinear,
-            int              gobBlocksInY,
-            int              gobBlocksInZ,
-            int              gobBlocksInTileX,
-            Target           target,
-            FormatInfo       formatInfo,
+            ulong gpuAddress,
+            int width,
+            int height,
+            int depthOrLayers,
+            int levels,
+            int samplesInX,
+            int samplesInY,
+            int stride,
+            bool isLinear,
+            int gobBlocksInY,
+            int gobBlocksInZ,
+            int gobBlocksInTileX,
+            Target target,
+            FormatInfo formatInfo,
             DepthStencilMode depthStencilMode = DepthStencilMode.Depth,
-            SwizzleComponent swizzleR         = SwizzleComponent.Red,
-            SwizzleComponent swizzleG         = SwizzleComponent.Green,
-            SwizzleComponent swizzleB         = SwizzleComponent.Blue,
-            SwizzleComponent swizzleA         = SwizzleComponent.Alpha)
+            SwizzleComponent swizzleR = SwizzleComponent.Red,
+            SwizzleComponent swizzleG = SwizzleComponent.Green,
+            SwizzleComponent swizzleB = SwizzleComponent.Blue,
+            SwizzleComponent swizzleA = SwizzleComponent.Alpha)
         {
-            GpuAddress       = gpuAddress;
-            Width            = width;
-            Height           = height;
-            DepthOrLayers    = depthOrLayers;
-            Levels           = levels;
-            SamplesInX       = samplesInX;
-            SamplesInY       = samplesInY;
-            Stride           = stride;
-            IsLinear         = isLinear;
-            GobBlocksInY     = gobBlocksInY;
-            GobBlocksInZ     = gobBlocksInZ;
+
+
+            int limit = 512;//HARDCODED
+
+            int _removedLevels = 0;
+            if (formatInfo.Format.IsAstc())
+            {
+                while (width > limit && height > limit && levels > 1)
+                {
+                    width >>= 1;
+                    height >>= 1;
+                    levels--;
+                    _removedLevels++;
+                }
+            }
+            RemovedLevels = _removedLevels;
+
+            GpuAddress = gpuAddress;
+            Width = width;
+            Height = height;
+            DepthOrLayers = depthOrLayers;
+            Levels = levels;
+            SamplesInX = samplesInX;
+            SamplesInY = samplesInY;
+            Stride = stride;
+            IsLinear = isLinear;
+            GobBlocksInY = gobBlocksInY;
+            GobBlocksInZ = gobBlocksInZ;
             GobBlocksInTileX = gobBlocksInTileX;
-            Target           = target;
-            FormatInfo       = formatInfo;
+            Target = target;
+            FormatInfo = formatInfo;
             DepthStencilMode = depthStencilMode;
-            SwizzleR         = swizzleR;
-            SwizzleG         = swizzleG;
-            SwizzleB         = swizzleB;
-            SwizzleA         = swizzleA;
+            SwizzleR = swizzleR;
+            SwizzleG = swizzleG;
+            SwizzleB = swizzleB;
+            SwizzleA = swizzleA;
         }
 
         /// <summary>
@@ -266,22 +285,22 @@ namespace Ryujinx.Graphics.Gpu.Image
         {
             if (Target == Target.TextureBuffer)
             {
-                return new SizeInfo(Width * FormatInfo.BytesPerPixel);
+                return new SizeInfo((Width << RemovedLevels) * FormatInfo.BytesPerPixel);
             }
             else if (IsLinear)
             {
                 return SizeCalculator.GetLinearTextureSize(
                     Stride,
-                    Height,
+                    Height << RemovedLevels,
                     FormatInfo.BlockHeight);
             }
             else
             {
                 return SizeCalculator.GetBlockLinearTextureSize(
-                    Width,
-                    Height,
+                    Width << RemovedLevels,
+                    Height << RemovedLevels,
                     GetDepth(),
-                    Levels,
+                    Levels + RemovedLevels,
                     GetLayers(),
                     FormatInfo.BlockWidth,
                     FormatInfo.BlockHeight,

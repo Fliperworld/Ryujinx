@@ -785,12 +785,12 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <returns>Converted data</returns>
         public SpanOrArray<byte> ConvertToHostCompatibleFormat(ReadOnlySpan<byte> data, int level = 0, bool single = false)
         {
-            int width = Info.Width;
-            int height = Info.Height;
+            int width = Info.Width << Info.RemovedLevels;
+            int height = Info.Height << Info.RemovedLevels;
 
             int depth = _depth;
             int layers = single ? 1 : _layers;
-            int levels = single ? 1 : (Info.Levels - level);
+            int levels = single ? 1 : ((Info.Levels + Info.RemovedLevels) - level);
 
             width = Math.Max(width >> level, 1);
             height = Math.Max(height >> level, 1);
@@ -843,7 +843,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                     depth,
                     levels,
                     layers,
-                    out byte[] decoded))
+                    out byte[] decoded, Info.RemovedLevels))
                 {
                     string texInfo = $"{Info.Target} {Info.FormatInfo.Format} {Info.Width}x{Info.Height}x{Info.DepthOrLayers} levels {Info.Levels}";
 
@@ -852,7 +852,15 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                 if (GraphicsConfig.EnableTextureRecompression)
                 {
-                    decoded = BCnEncoder.EncodeBC7(decoded, width, height, depth, levels, layers);
+                    if (Info.RemovedLevels > 0)
+                    {
+                        width = Math.Max(Info.Width >> level, 1);
+                        height = Math.Max(Info.Height >> level, 1);
+                        levels -= Info.RemovedLevels;
+                    }
+
+                    result = BCnEncoder.EncodeBC7(decoded, width, height, depth, levels, layers);
+                    return result;
                 }
 
                 result = decoded;

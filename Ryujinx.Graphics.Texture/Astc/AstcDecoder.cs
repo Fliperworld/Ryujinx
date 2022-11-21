@@ -31,7 +31,8 @@ namespace Ryujinx.Graphics.Texture.Astc
             int height,
             int depth,
             int levels,
-            int layers)
+            int layers,
+            int StartlevelsToSkip = 0)
         {
             if ((uint)blockWidth > 12)
             {
@@ -62,6 +63,7 @@ namespace Ryujinx.Graphics.Texture.Astc
             {
                 for (int j = 0; j < layers; j++)
                 {
+                    bool skip = i < StartlevelsToSkip;
                     ref AstcLevel level = ref Levels[i * layers + j];
 
                     level.ImageSizeX = Math.Max(1, width >> i);
@@ -75,7 +77,10 @@ namespace Ryujinx.Graphics.Texture.Astc
                     level.OutputByteOffset = currentOutputOffset;
 
                     currentInputBlock += level.TotalBlockCount;
-                    currentOutputOffset += level.PixelCount * 4;
+                    if (skip)
+                        level.ImageSizeX = -1;
+                    else
+                        currentOutputOffset += level.PixelCount * 4;
                 }
             }
 
@@ -116,6 +121,10 @@ namespace Ryujinx.Graphics.Texture.Astc
 
         public void ProcessBlock(int index)
         {
+            AstcLevel levelInfo = GetLevelInfo(index);
+            if (levelInfo.ImageSizeX == -1)
+                return;
+
             Buffer16 inputBlock = MemoryMarshal.Cast<byte, Buffer16>(InputBuffer.Span)[index];
 
             Span<int> decompressedData = stackalloc int[144];
@@ -130,9 +139,7 @@ namespace Ryujinx.Graphics.Texture.Astc
             }
 
             Span<byte> decompressedBytes = MemoryMarshal.Cast<int, byte>(decompressedData);
-
-            AstcLevel levelInfo = GetLevelInfo(index);
-
+            
             WriteDecompressedBlock(decompressedBytes, OutputBuffer.Span.Slice(levelInfo.OutputByteOffset),
                 index - levelInfo.StartBlock, levelInfo);
         }
@@ -291,11 +298,12 @@ namespace Ryujinx.Graphics.Texture.Astc
             int depth,
             int levels,
             int layers,
-            out byte[] decoded)
+            out byte[] decoded,
+            int StartlevelsToSkip = 0)
         {
             byte[] output = new byte[QueryDecompressedSize(width, height, depth, levels, layers)];
 
-            AstcDecoder decoder = new AstcDecoder(data, output, blockWidth, blockHeight, width, height, depth, levels, layers);
+            AstcDecoder decoder = new AstcDecoder(data, output, blockWidth, blockHeight, width, height, depth, levels, layers, StartlevelsToSkip);
 
             Enumerable.Range(0, decoder.TotalBlockCount).AsParallel().ForAll(x => decoder.ProcessBlock(x));
 
