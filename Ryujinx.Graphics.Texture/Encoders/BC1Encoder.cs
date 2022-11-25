@@ -7,8 +7,8 @@ namespace Ryujinx.Graphics.Texture.Encoders
 {
     static class BC1Encoder
     {
-        //Values Between 0~254 any pixel with Alpha below or equal this threshold will be invisible
-        //otherwise 100% opaque
+        // Values Between 0~254 any pixel with Alpha below or equal this threshold will be invisible,
+        // otherwise 100% opaque.
         private const int AlphaCutOff = 128;
         public static void Encode(Memory<byte> outputStorage, Memory<byte> data, int width, int height, EncodeMode mode)
         {
@@ -79,8 +79,8 @@ namespace Ryujinx.Graphics.Texture.Encoders
             const int C565_6_MASK = 0xFC;
 
             RgbaColor32[] colors = new RgbaColor32[4];
-            var indices = MemoryMarshal.Cast<byte, int>(outputBlock.Slice(4))[0];
-            indices = 0;
+            var indicesPTR = MemoryMarshal.Cast<byte, int>(outputBlock.Slice(4));
+            indicesPTR[0] = 0;
             var ColorsC0c1 = MemoryMarshal.Cast<byte, ushort>(outputBlock);
 
             colors[0].R = (maxColor.R & C565_5_MASK) | (maxColor.R >> 5);
@@ -119,7 +119,7 @@ namespace Ryujinx.Graphics.Texture.Encoders
             {
                 if (colorBlock[i].A <= AlphaCutOff)
                 {
-                    indices |= 3 << (i << 1);//just set index 11, color3 (transparent black)
+                    indicesPTR[0] |= 3 << (i << 1);//just set index 11, color3 (transparent black)
                     continue;
                 }
                 int c0 = colorBlock[i].R;
@@ -140,15 +140,9 @@ namespace Ryujinx.Graphics.Texture.Encoders
                 int x0 = b1 & b2;
                 int x1 = b0 & b3;
                 int x2 = b0 & b4;
-                indices |= (x2 | ((x0 | x1) << 1)) << (i << 1);
+                indicesPTR[0] |= (x2 | ((x0 | x1) << 1)) << (i << 1);
 
             }
-
-            //maybe another recast to int??!
-            outputBlock[4] = (byte)((indices >> 0) & 255);
-            outputBlock[5] = (byte)((indices >> 8) & 255);
-            outputBlock[6] = (byte)((indices >> 16) & 255);
-            outputBlock[7] = (byte)((indices >> 24) & 255);
 
         }
 
