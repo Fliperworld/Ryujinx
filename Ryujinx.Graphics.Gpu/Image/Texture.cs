@@ -852,7 +852,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                 if (GraphicsConfig.EnableTextureRecompression)
                 {
-                    decoded = BCnEncoder.EncodeBC7(decoded, width, height, depth, levels, layers);
+                    decoded = BCnEncoder.EncodeBC1(decoded, width, height, depth, levels, layers);
                 }
 
                 result = decoded;
