@@ -159,6 +159,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
         private int _referenceCount;
         private List<TexturePoolOwner> _poolOwners;
+        private bool _useBc1 = true;
 
         /// <summary>
         /// Constructs a new instance of the cached GPU texture.
@@ -623,6 +624,63 @@ namespace Ryujinx.Graphics.Gpu.Image
             }
         }
 
+        private static TextureCreateInfo GetCreateInfoBC7(TextureInfo info, Capabilities caps, float scale)
+        {
+            FormatInfo formatInfo = info.FormatInfo.Format.IsAstcUnorm() ? new FormatInfo(Format.Bc7Unorm, 4, 4, 16, 4) : new FormatInfo(Format.Bc7Srgb, 4, 4, 16, 4);
+            int width = info.Width / info.SamplesInX;
+            int height = info.Height / info.SamplesInY;
+
+            int depth = info.GetDepth() * info.GetLayers();
+
+            if (scale != 1f)
+            {
+                width = (int)MathF.Ceiling(width * scale);
+                height = (int)MathF.Ceiling(height * scale);
+            }
+
+            return new TextureCreateInfo(
+                width,
+                height,
+                depth,
+                info.Levels,
+                info.Samples,
+                formatInfo.BlockWidth,
+                formatInfo.BlockHeight,
+                formatInfo.BytesPerPixel,
+                formatInfo.Format,
+                info.DepthStencilMode,
+                info.Target,
+                info.SwizzleR,
+                info.SwizzleG,
+                info.SwizzleB,
+                info.SwizzleA);
+        }
+        public void SwitchToBC7()
+        {
+            if (_viewStorage != this)
+            {
+                _viewStorage.SwitchToBC7();
+                return;
+            }
+            if (!_useBc1)
+                return;
+
+            _useBc1= false;
+            Logger.Debug?.Print(LogClass.Gpu, $"Switching Recompression mode to BC7 at : 0x{Info.GpuAddress:X}.");
+            TextureCreateInfo createInfo = GetCreateInfoBC7(Info, _context.Capabilities, ScaleFactor);
+            ITexture newStorage = _context.Renderer.CreateTexture(createInfo, ScaleFactor);
+            ReplaceStorage(newStorage);
+
+            // All views must be recreated against the new storage.
+            foreach (var view in _views)
+            {
+                TextureCreateInfo viewCreateInfo = GetCreateInfoBC7(view.Info, _context.Capabilities, ScaleFactor);
+                ITexture newView = HostTexture.CreateView(viewCreateInfo, view.FirstLayer - FirstLayer, view.FirstLevel - FirstLevel);
+                view.ReplaceStorage(newView);
+            }
+
+        }
+
         /// <summary>
         /// Checks if the memory for this texture was modified, and returns true if it was.
         /// The modified flags are optionally consumed as a result.
@@ -785,12 +843,12 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <returns>Converted data</returns>
         public SpanOrArray<byte> ConvertToHostCompatibleFormat(ReadOnlySpan<byte> data, int level = 0, bool single = false)
         {
-            int width = Info.Width;
-            int height = Info.Height;
+            int width = Info.Width << Info.RemovedLevels;
+            int height = Info.Height << Info.RemovedLevels;
 
             int depth = _depth;
             int layers = single ? 1 : _layers;
-            int levels = single ? 1 : (Info.Levels - level);
+            int levels = single ? 1 : ((Info.Levels + Info.RemovedLevels) - level);
 
             width = Math.Max(width >> level, 1);
             height = Math.Max(height >> level, 1);
@@ -843,7 +901,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                     depth,
                     levels,
                     layers,
-                    out byte[] decoded))
+                    out byte[] decoded,Info.RemovedLevels))
                 {
                     string texInfo = $"{Info.Target} {Info.FormatInfo.Format} {Info.Width}x{Info.Height}x{Info.DepthOrLayers} levels {Info.Levels}";
 
@@ -852,7 +910,31 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                 if (GraphicsConfig.EnableTextureRecompression)
                 {
-                    decoded = BCnEncoder.EncodeBC1(decoded, width, height, depth, levels, layers);
+                    if (Info.RemovedLevels > 0)
+                    {
+                        width = Math.Max(Info.Width >> level, 1);
+                        height = Math.Max(Info.Height >> level, 1);
+                        levels -= Info.RemovedLevels;
+                    }
+
+                    if (_useBc1)
+                    {
+                        int max = AstcDecoder.QueryDecompressedSize(width, height, depth, levels, layers);
+                        for (int index = 3; index < max; index += 4)
+                        {
+                            if (decoded[index] < 255 && decoded[index] > 0)
+                            {
+                                //Logger.Info?.Print(LogClass.Gpu, $"Can't recompress with BC1,Texture with Alpha at : 0x{Info.GpuAddress:X}.");
+                                result = BCnEncoder.EncodeBC7(decoded, width, height, depth, levels, layers);
+                                SwitchToBC7();
+                                return result;
+                            }
+                        }
+                        result = BCnEncoder.EncodeBC1(decoded, width, height, depth, levels, layers);
+                        return result;
+                    }
+
+                    decoded = BCnEncoder.EncodeBC7(decoded, width, height, depth, levels, layers);
                 }
 
                 result = decoded;
